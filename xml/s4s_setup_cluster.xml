@@ -6,15 +6,11 @@
 ]>
 <chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0" xml:id="cha.s4s.cluster">
  <title>Setting Up an &hana; Cluster</title>
- <para>
-  You can use a &yast; wizard to set up &hana; or &s4hd; clusters according
-  to best practices, including &hana; system replication. A summary of the
-  setup options is given in <xref linkend="sec.s4s.hana-replicate"/>.
- </para>
 
  <para>
   The following <emphasis>Best Practices</emphasis> from the &sles4sap;
-  Resource Library (&reslibrary;) contain setup instructions:
+  Resource Library (&reslibrary;) contain instructions for the manual setup
+  of such clusters:
  </para>
  <itemizedlist>
   <listitem>
@@ -38,22 +34,169 @@
    </formalpara>
   </listitem>
  </itemizedlist>
- <important>
-  <title>Wizard Can Only Be Used for Initial Configuration</title>
+
+ <sect1 xml:id="sec.s4s.hana-cluster.scenario">
+  <title>Supported Scenarios</title>
   <para>
-   The &yast; wizard described in the following can only be used for the
-   initial cluster configuration.
+   ..!
   </para>
-  <para>
-   To reconfigure a cluster, use the separate
-   &yast; module <guimenu>Cluster</guimenu> (available from package
-   <package>yast2-cluster</package>).
-   For more information about its usage, see <citetitle>&admin;, Part
-   <quote>Installation, Setup and Upgrade</quote>, Chapter <quote>Using the
-   &yast; Cluster Module</quote></citetitle> at &ha-docaddress;.
-  </para>
- </important>
- <sect1 xml:id="sec.s4s.hana-cluster.prerequisite">
+  <sect2 xml:id="sec.s4s.hana-ra">
+   <title><systemitem>SAPHana</systemitem> Resource Agent</title>
+   <!--
+    Terms:
+    + scale-up: adding more resources to an existing system
+    + scale-out: adding complementary systems to your existing ones
+
+    Replication is orthogonal to either of these: It is possible with either
+    scale-up or scale-out scenarios.
+
+    Fixme/12 SP2: Are scale-out scenarios supported? FATE#318793
+    - sknorr, 2016-02-04
+   -->
+   <!--
+    Feedback from Fabian Herschel regarding the word "failover":
+    "[W]e should be careful about terms like "failover" or "takeover". Because
+    in the SAP HANA ecosystem, the terms are all used twice but differently
+    than we do. As normally only SAP HANA users will be interested in details
+    about the RAs, I suggest to follow the SAP wording to avoid confusion."
+    => Use "takeover".
+   -->
+   <para>
+    This resource agent from &suse; supports scale-up scenarios by checking the
+    &hana; database instances for whether a takeover needs to happen.
+    Unlike with the pure &sap; solution, takeovers can be automated.
+   </para>
+   <para>
+    It is configured as a master/slave resource: The master assumes
+    responsibility for the &hana; databases running in primary mode,
+    whereas the slave is responsible for instances
+    that are operated in synchronous (secondary) status. In case of a takeover,
+    the secondary (slave resource instance) can automatically be promoted to
+    become the new primary (master resource instance).
+   </para>
+
+   <para>
+    This resource agent supports system replication for the following in
+    scale-up scenarios:
+   </para>
+   <itemizedlist>
+    <listitem>
+     <formalpara>
+      <title>Performance-Optimized Scenario</title>
+      <para>
+       Two servers (A and B) in the same &sleha; cluster, one primary (A)
+       and one secondary (B). The &hana; instance from the primary server (A) is
+       replicated synchronously to the secondary server (B).
+      </para>
+     </formalpara>
+    </listitem>
+    <listitem>
+     <formalpara>
+      <title>Cost-Optimized Scenario</title>
+      <para>
+       The basic setup of A and B is the same as in the
+       <emphasis>Performance-Optimized Scenario</emphasis>.
+       However, the secondary server (B) is also used for non-productive
+       purposes, such as for an additional &hana; database for development or
+       QA. The production
+       database is only kept on permanent memory, such as a hard disk.
+       If a takeover needs to occur, the non-productive server will be stopped
+       before the takeover is processed. The system resources for the
+       productive database are then increased as quickly as possible via an
+       &sap; hook call-out script.
+      </para>
+     </formalpara>
+    </listitem>
+    <listitem>
+     <formalpara>
+      <title>Chain/Multi-Tier Scenario</title>
+      <para>
+       Three servers (A, B, and C), of which two are located in the
+       same &sleha; cluster (A and B). The third server (C) is located
+       externally. The &hana; system on the primary server (A) is replicated
+       synchronously to the secondary server (B). The secondary server (B) is
+       replicated asynchronously to the external server (C).
+      </para>
+     </formalpara>
+     <para>
+      If a takeover from A to B occurs, the connection between B and C remains
+      untouched. However, B is not allowed to be the source for two servers
+      (A and C), as this would be a <quote>star</quote> topology which
+      is not supported with current &hana; versions (such as SPS11).
+     </para>
+     <para>
+      Using &hana; commands, you can then manually decide what to do:
+     </para>
+     <itemizedlist>
+      <listitem>
+       <para>
+        The connection between B and C can be broken, so that B can
+        connect to A.
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        If replication to the external site (C) is more important than
+        local system replication, the connection between B and C can be kept.
+       </para>
+      </listitem>
+     </itemizedlist>
+    </listitem>
+   </itemizedlist>
+   <para>
+    For all of the scenarios, &sles4sap; supports both single-tenant and
+    multi-tenant &hana; databases. That is, you can use &hana; databases that
+    serve multiple &sap; applications.
+   </para>
+  </sect2>
+  <sect2 xml:id="sec.s4s.hana-scale-out-ra">
+   <title><systemitem>SAPHanaController</systemitem> Resource Agent</title>
+   <para>
+    For the performance-optimized scenario, the
+    <systemitem class="resource">SAPHanaController</systemitem> resource agent
+    supports <quote>scale-out</quote> scenarios. This means that both the
+    primary system (A) and the secondary system (B) can be a
+    <quote>swarm</quote> of computers instead of single computers.
+   </para>
+  </sect2>
+  <sect2 xml:id="sec.s4s.topology-ra">
+   <title><systemitem>SAPHanaTopology</systemitem> Resource Agent</title>
+   <para>
+    To make configuring the cluster as simple as possible, SUSE has
+    developed the <systemitem>SAPHanaTopology</systemitem> resource agent.
+    This agent runs on all
+    nodes of a &sleha; cluster and gathers information about the status and
+    configurations of &hana; system replications. It is designed as a
+    normal (stateless) clone.
+   </para>
+  </sect2>
+ </sect1>
+
+ <sect1>
+  <title>Using the &yast; Module <guimenu>HA Setup for SAP Products</guimenu></title>
+   <para>
+    This section describes setting up &hana; or &s4hd; scale-up clusters
+    including &hana; system replication according to best practices using a
+    &yast; wizard. A summary of the
+    setup options is given in <xref linkend="sec.s4s.hana-replicate"/>.
+   </para>
+   <important>
+    <title>Wizard Can Only Be Used for Initial Configuration</title>
+    <para>
+     The &yast; wizard described in the following can only be used for the
+     initial cluster configuration.
+    </para>
+    <para>
+     To reconfigure a cluster, use the separate
+     &yast; module <guimenu>Cluster</guimenu> (available from package
+     <package>yast2-cluster</package>).
+     For more information about its usage, see <citetitle>&admin;, Part
+     <quote>Installation, Setup and Upgrade</quote>, Chapter <quote>Using the
+     &yast; Cluster Module</quote></citetitle> at &ha-docaddress;.
+    </para>
+   </important>
+
+ <sect2 xml:id="sec.s4s.hana-cluster.prerequisite">
   <title>Prerequisites</title>
   <para>
    The following procedure has prerequisites:
@@ -149,8 +292,8 @@
     </para>
    </listitem>
   </itemizedlist>
- </sect1>
- <sect1 xml:id="sec.s4s.hana-cluster.wizard">
+ </sect2>
+ <sect2 xml:id="sec.s4s.hana-cluster.wizard">
   <title>Setup</title>
   <procedure xml:id="pro.s4s.hana-cluster">
    <para>
@@ -643,8 +786,8 @@
     </screen>
    </step>
   </procedure>
- </sect1>
- <sect1 xml:id="sec.s4s.hawk">
+ </sect2>
+ <sect2 xml:id="sec.s4s.hawk">
   <title>Using &hawk;</title>
   <para>
    After you have set up the cluster using the wizard, you can open &hawk;.
@@ -686,5 +829,6 @@
    <quote>Configuring and Managing Cluster Resources with
    &hawk;</quote></citetitle> (&ha-docaddress;).
   </para>
+ </sect2>
  </sect1>
 </chapter>
